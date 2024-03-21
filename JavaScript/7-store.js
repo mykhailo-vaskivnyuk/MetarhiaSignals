@@ -5,12 +5,19 @@ module.exports = class Store {
   #onChange = null;
   #parent = null;
 
-  constructor(state, keys) {
+  constructor({ state, keys, onStateChange }) {
     this.state = state;
     this.#keys = keys;
+    this.#onChange = onStateChange;
     for (const value of Object.values(state)) {
       if(value instanceof Store) value.setParent(this);
     }
+  }
+
+  #_onStateChange() {
+    if (!this.#onChange) return;
+    this.#onChange(this.#subscribers, this.state);
+    return this;
   }
 
   setParent(parent) {
@@ -19,31 +26,30 @@ module.exports = class Store {
   }
 
   subscribe(key, cb) {
-    if (!this.#keys.includes(key)) return;
-    this.#subscribers.set(key, cb);
+    const needCheck = this.#keys.length > 0;
+    if (!needCheck || this.#keys.includes(key)) {
+      this.#subscribers.set(key, cb);
+    } else {
+      throw new Error(`Subscriber [ ${key} ] is not allowed`);
+    }
     return () => this.#subscribers.delete(key);
   }
 
-  onStateChange(cb) {
-    this.#onChange = () => cb(this.#subscribers, this.state);
-    return this;
-  }
-
-  setState(value) {
-    let newState = value;
-    if (typeof value === 'function') {
-      newState = value(this.state);
+  setState(newState) {
+    let changed = false;
+    for (const [key, value] of Object.entries(newState)) {
+      if (!(key in this.state)) continue;
+      if (this.state[key] === value) continue;
+      changed = true;
+      this.state[key] = value;
     }
-    if (this.state === newState) return;
-    this.state = newState;
-    if (!this.#onChange) return;
-    this.#onChange();
-    this.#parent?.update();
+    if (changed) this.change();;
     return this;
   }
 
-  update() {
-    this.setState({ ...this.state });
+  change() {
+    this.#_onStateChange();
+    this.#parent?.change();
     return this;
   }
 
